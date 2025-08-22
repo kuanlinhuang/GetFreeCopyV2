@@ -14,57 +14,81 @@ async function searchArxiv(query: string, dateFilter: string, page: number, limi
     } else if (dateFilter === '2024') {
       searchQuery += `+AND+submittedDate:[20240101*+TO+20241231*]`;
     } else if (dateFilter === 'last_year') {
-      searchQuery += `+AND+submittedDate:[20240101*+TO+20241231*]`;
+      const currentYear = new Date().getFullYear();
+      const lastYear = currentYear - 1;
+      searchQuery += `+AND+submittedDate:[${lastYear}0101*+TO+${lastYear}1231*]`;
+    } else if (dateFilter === 'last_6_months') {
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const year = sixMonthsAgo.getFullYear();
+      const month = String(sixMonthsAgo.getMonth() + 1).padStart(2, '0');
+      searchQuery += `+AND+submittedDate:[${year}${month}01*+TO+*]`;
+    } else if (dateFilter === 'last_30_days') {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const year = thirtyDaysAgo.getFullYear();
+      const month = String(thirtyDaysAgo.getMonth() + 1).padStart(2, '0');
+      const day = String(thirtyDaysAgo.getDate()).padStart(2, '0');
+      searchQuery += `+AND+submittedDate:[${year}${month}${day}*+TO+*]`;
     }
 
-    const url = `http://export.arxiv.org/api/query?search_query=${searchQuery}&start=${startIndex}&max_results=${limit}`;
+    const url = `http://export.arxiv.org/api/query?search_query=${searchQuery}&start=${startIndex}&max_results=${limit}&sortBy=submittedDate&sortOrder=descending`;
+    
+    console.log('ArXiv API URL:', url);
     
     const response = await fetch(url);
-    const xmlText = await response.text();
-    
-    // Parse XML response
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
-    const entries = xmlDoc.getElementsByTagName('entry');
-    
-    const papers: Paper[] = [];
-    
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      const title = entry.getElementsByTagName('title')[0]?.textContent?.trim() || '';
-      const summary = entry.getElementsByTagName('summary')[0]?.textContent?.trim() || '';
-      const published = entry.getElementsByTagName('published')[0]?.textContent?.trim() || '';
-      const id = entry.getElementsByTagName('id')[0]?.textContent?.trim() || '';
-      const arxivId = id.split('/').pop() || '';
-      
-      const authors: string[] = [];
-      const authorElements = entry.getElementsByTagName('author');
-      for (let j = 0; j < authorElements.length; j++) {
-        const name = authorElements[j].getElementsByTagName('name')[0]?.textContent?.trim();
-        if (name) authors.push(name);
-      }
-      
-      const categories: string[] = [];
-      const categoryElements = entry.getElementsByTagName('category');
-      for (let k = 0; k < categoryElements.length; k++) {
-        const term = categoryElements[k].getAttribute('term');
-        if (term) categories.push(term);
-      }
-      
-      papers.push({
-        id: arxivId,
-        title,
-        authors,
-        abstract: summary,
-        arxivId,
-        source: 'arxiv',
-        category: categories[0],
-        publishedDate: published,
-        url: id,
-        keywords: categories,
-      });
+    if (!response.ok) {
+      throw new Error(`ArXiv API responded with status: ${response.status}`);
     }
     
+    const xmlText = await response.text();
+    
+    // Node.js XML parsing using a simpler approach
+    const entries = xmlText.match(/<entry>[\s\S]*?<\/entry>/g) || [];
+    const papers: Paper[] = [];
+    
+    for (const entryXml of entries) {
+      try {
+        const title = entryXml.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.trim().replace(/\n\s*/g, ' ') || '';
+        const summary = entryXml.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.trim().replace(/\n\s*/g, ' ') || '';
+        const published = entryXml.match(/<published>([\s\S]*?)<\/published>/)?.[1]?.trim() || '';
+        const id = entryXml.match(/<id>([\s\S]*?)<\/id>/)?.[1]?.trim() || '';
+        const arxivId = id.split('/').pop()?.replace('v1', '').replace('v2', '').replace('v3', '') || '';
+        
+        const authors: string[] = [];
+        const authorMatches = entryXml.match(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>[\s\S]*?<\/author>/g) || [];
+        for (const authorMatch of authorMatches) {
+          const name = authorMatch.match(/<name>([\s\S]*?)<\/name>/)?.[1]?.trim();
+          if (name) authors.push(name);
+        }
+        
+        const categories: string[] = [];
+        const categoryMatches = entryXml.match(/<category term="([^"]*)"[^>]*>/g) || [];
+        for (const categoryMatch of categoryMatches) {
+          const term = categoryMatch.match(/term="([^"]*)"/)?.[1];
+          if (term) categories.push(term);
+        }
+        
+        if (title && summary) {
+          papers.push({
+            id: arxivId,
+            title,
+            authors,
+            abstract: summary,
+            arxivId,
+            source: 'arxiv',
+            category: categories[0],
+            publishedDate: published,
+            url: id,
+            keywords: categories,
+          });
+        }
+      } catch (entryError) {
+        console.error('Error parsing ArXiv entry:', entryError);
+      }
+    }
+    
+    console.log(`ArXiv search returned ${papers.length} papers`);
     return papers;
   } catch (error) {
     console.error('ArXiv API error:', error);
@@ -82,7 +106,9 @@ async function searchBioRxiv(query: string, server: 'biorxiv' | 'medrxiv', dateF
     } else if (dateFilter === '2024') {
       interval = '2024-01-01/2024-12-31';
     } else if (dateFilter === 'last_year') {
-      interval = '2024-01-01/2024-12-31';
+      const currentYear = new Date().getFullYear();
+      const lastYear = currentYear - 1;
+      interval = `${lastYear}-01-01/${lastYear}-12-31`;
     } else if (dateFilter === 'last_6_months') {
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -95,10 +121,19 @@ async function searchBioRxiv(query: string, server: 'biorxiv' | 'medrxiv', dateF
     const cursor = (page - 1) * limit;
     const url = `https://api.biorxiv.org/details/${server}/${interval}/${cursor}/json`;
     
+    console.log(`${server} API URL:`, url);
+    
     const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`${server} API responded with status: ${response.status}`);
+    }
+    
     const data = await response.json();
     
-    if (!data.collection) return [];
+    if (!data.collection || !Array.isArray(data.collection)) {
+      console.log(`${server} returned no collection data`);
+      return [];
+    }
     
     // Filter by query in title or abstract
     const filteredPapers = data.collection.filter((paper: any) => {
@@ -107,19 +142,23 @@ async function searchBioRxiv(query: string, server: 'biorxiv' | 'medrxiv', dateF
       return titleMatch || abstractMatch;
     });
     
-    const papers: Paper[] = filteredPapers.slice(0, limit).map((paper: any) => ({
-      id: paper.doi || paper.preprint_doi,
-      title: paper.title || '',
-      authors: paper.authors ? paper.authors.split(';').map((a: string) => a.trim()) : [],
-      abstract: paper.abstract || '',
-      doi: paper.doi,
-      source: server,
-      category: paper.category || '',
-      publishedDate: paper.date || '',
-      url: `https://www.${server}.org/content/10.1101/${paper.doi || paper.preprint_doi}`,
-      keywords: paper.category ? [paper.category] : [],
-    }));
+    const papers: Paper[] = filteredPapers.slice(0, limit).map((paper: any) => {
+      const doiValue = paper.doi || paper.preprint_doi || '';
+      return {
+        id: doiValue,
+        title: paper.title || '',
+        authors: paper.authors ? paper.authors.split(';').map((a: string) => a.trim()) : [],
+        abstract: paper.abstract || '',
+        doi: paper.doi,
+        source: server,
+        category: paper.category || '',
+        publishedDate: paper.date || '',
+        url: doiValue ? `https://www.${server}.org/content/10.1101/${doiValue}` : '#',
+        keywords: paper.category ? [paper.category] : [],
+      };
+    });
     
+    console.log(`${server} search returned ${papers.length} papers`);
     return papers;
   } catch (error) {
     console.error(`${server} API error:`, error);
@@ -139,77 +178,100 @@ async function searchPMC(query: string, dateFilter: string, page: number, limit:
     } else if (dateFilter === '2024') {
       term += `+AND+2024[PDAT]`;
     } else if (dateFilter === 'last_year') {
-      term += `+AND+2024[PDAT]`;
+      const currentYear = new Date().getFullYear();
+      const lastYear = currentYear - 1;
+      term += `+AND+${lastYear}[PDAT]`;
+    } else if (dateFilter === 'last_6_months') {
+      const sixMonthsAgo = new Date();
+      const year = sixMonthsAgo.getFullYear();
+      const month = String(sixMonthsAgo.getMonth() + 7).padStart(2, '0'); // PMC uses different date format
+      term += `+AND+${year}/${month}[PDAT]:3000[PDAT]`;
     }
     
     // First, search for PMIDs
-    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pmc&term=${term}&retmode=json&retmax=${limit}&retstart=${retstart}`;
+    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pmc&term=${term}&retmode=json&retmax=${limit}&retstart=${retstart}&sort=pub_date`;
+    
+    console.log('PMC search URL:', searchUrl);
     
     const searchResponse = await fetch(searchUrl);
+    if (!searchResponse.ok) {
+      throw new Error(`PMC search API responded with status: ${searchResponse.status}`);
+    }
+    
     const searchData = await searchResponse.json();
     
     if (!searchData.esearchresult?.idlist || searchData.esearchresult.idlist.length === 0) {
+      console.log('PMC search returned no results');
       return [];
     }
     
     // Then fetch details for found PMIDs
-    const pmids = searchData.esearchresult.idlist.join(',');
-    const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pmc&id=${pmids}&retmode=xml`;
+    const pmcIds = searchData.esearchresult.idlist.join(',');
+    const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pmc&id=${pmcIds}&retmode=xml`;
     
     const fetchResponse = await fetch(fetchUrl);
-    const xmlText = await fetchResponse.text();
-    
-    // Parse XML response
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
-    const articles = xmlDoc.getElementsByTagName('article');
-    
-    const papers: Paper[] = [];
-    
-    for (let i = 0; i < articles.length; i++) {
-      const article = articles[i];
-      
-      const titleElement = article.querySelector('article-title');
-      const title = titleElement?.textContent?.trim() || '';
-      
-      const abstractElement = article.querySelector('abstract p');
-      const abstract = abstractElement?.textContent?.trim() || '';
-      
-      const authors: string[] = [];
-      const authorElements = article.querySelectorAll('contrib[contrib-type="author"] name');
-      authorElements.forEach(author => {
-        const surname = author.querySelector('surname')?.textContent || '';
-        const givenNames = author.querySelector('given-names')?.textContent || '';
-        if (surname || givenNames) {
-          authors.push(`${givenNames} ${surname}`.trim());
-        }
-      });
-      
-      const pmidElement = article.querySelector('article-id[pub-id-type="pmid"]');
-      const pmid = pmidElement?.textContent || '';
-      
-      const pmcIdElement = article.querySelector('article-id[pub-id-type="pmc"]');
-      const pmcId = pmcIdElement?.textContent || '';
-      
-      const pubDateElement = article.querySelector('pub-date');
-      const year = pubDateElement?.querySelector('year')?.textContent || '';
-      const month = pubDateElement?.querySelector('month')?.textContent || '01';
-      const day = pubDateElement?.querySelector('day')?.textContent || '01';
-      const publishedDate = year ? `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}` : '';
-      
-      papers.push({
-        id: pmcId || pmid,
-        title,
-        authors,
-        abstract,
-        pmid,
-        source: 'pmc',
-        publishedDate,
-        url: `https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcId}/`,
-        keywords: [],
-      });
+    if (!fetchResponse.ok) {
+      throw new Error(`PMC fetch API responded with status: ${fetchResponse.status}`);
     }
     
+    const xmlText = await fetchResponse.text();
+    
+    // Simple XML parsing for Node.js
+    const articleMatches = xmlText.match(/<article[^>]*>[\s\S]*?<\/article>/g) || [];
+    const papers: Paper[] = [];
+    
+    for (const articleXml of articleMatches) {
+      try {
+        const title = articleXml.match(/<article-title[^>]*>([\s\S]*?)<\/article-title>/)?.[1]?.trim().replace(/<[^>]*>/g, '') || '';
+        
+        // Try to find abstract
+        const abstractMatch = articleXml.match(/<abstract[^>]*>([\s\S]*?)<\/abstract>/)?.[1] || '';
+        const abstract = abstractMatch.replace(/<[^>]*>/g, '').trim() || '';
+        
+        const authors: string[] = [];
+        const authorMatches = articleXml.match(/<contrib contrib-type="author"[^>]*>[\s\S]*?<\/contrib>/g) || [];
+        for (const authorMatch of authorMatches) {
+          const surname = authorMatch.match(/<surname[^>]*>([\s\S]*?)<\/surname>/)?.[1]?.trim() || '';
+          const givenNames = authorMatch.match(/<given-names[^>]*>([\s\S]*?)<\/given-names>/)?.[1]?.trim() || '';
+          if (surname || givenNames) {
+            authors.push(`${givenNames} ${surname}`.trim());
+          }
+        }
+        
+        const pmid = articleXml.match(/<article-id pub-id-type="pmid"[^>]*>([\s\S]*?)<\/article-id>/)?.[1]?.trim() || '';
+        const pmcId = articleXml.match(/<article-id pub-id-type="pmc"[^>]*>([\s\S]*?)<\/article-id>/)?.[1]?.trim() || '';
+        
+        // Try to extract publication date
+        const pubDateMatch = articleXml.match(/<pub-date[^>]*>[\s\S]*?<\/pub-date>/);
+        let publishedDate = '';
+        if (pubDateMatch) {
+          const year = pubDateMatch[0].match(/<year[^>]*>([\s\S]*?)<\/year>/)?.[1] || '';
+          const month = pubDateMatch[0].match(/<month[^>]*>([\s\S]*?)<\/month>/)?.[1] || '01';
+          const day = pubDateMatch[0].match(/<day[^>]*>([\s\S]*?)<\/day>/)?.[1] || '01';
+          if (year) {
+            publishedDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          }
+        }
+        
+        if (title && (abstract || authors.length > 0)) {
+          papers.push({
+            id: pmcId || pmid,
+            title,
+            authors,
+            abstract,
+            pmid,
+            source: 'pmc',
+            publishedDate,
+            url: pmcId ? `https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcId}/` : `https://www.ncbi.nlm.nih.gov/pubmed/${pmid}`,
+            keywords: [],
+          });
+        }
+      } catch (entryError) {
+        console.error('Error parsing PMC entry:', entryError);
+      }
+    }
+    
+    console.log(`PMC search returned ${papers.length} papers`);
     return papers;
   } catch (error) {
     console.error('PMC API error:', error);

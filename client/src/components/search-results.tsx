@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { searchPapers } from "@/lib/api";
 import { PaperCard } from "./paper-card";
 import { Button } from "@/components/ui/button";
 import { Filter, Download } from "lucide-react";
 import type { SearchState } from "@/types";
 import type { SearchResponse } from "@shared/schema";
+import { useEffect } from "react";
 
 interface SearchResultsProps {
   searchState: SearchState;
@@ -12,24 +13,32 @@ interface SearchResultsProps {
 }
 
 export function SearchResults({ searchState, setSearchState }: SearchResultsProps) {
-  const { data, isLoading, error } = useQuery<SearchResponse>({
-    queryKey: ['/api/search', searchState.query, searchState.filters, searchState.page],
+  const queryClient = useQueryClient();
+  
+  const searchParams = {
+    query: searchState.query,
+    sources: searchState.filters.sources,
+    dateFilter: searchState.filters.dateFilter,
+    sortBy: searchState.filters.sortBy,
+    page: searchState.page,
+    limit: 20
+  };
+
+  const { data, isLoading, error, refetch } = useQuery<SearchResponse>({
+    queryKey: ['search', searchParams],
+    queryFn: () => searchPapers(searchParams),
     enabled: !!searchState.query && searchState.query.trim().length > 0,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  // Update loading state
-  if (isLoading !== searchState.isLoading) {
-    setSearchState(prev => ({ ...prev, isLoading }));
-  }
-
-  // Update error state
-  if (error && !searchState.error) {
+  // Update loading state in useEffect to avoid state updates during render
+  useEffect(() => {
     setSearchState(prev => ({ 
       ...prev, 
-      error: error instanceof Error ? error.message : 'Search failed' 
+      isLoading,
+      error: error ? (error instanceof Error ? error.message : 'Search failed') : null
     }));
-  }
+  }, [isLoading, error, setSearchState]);
 
   if (!searchState.query || !data) {
     return null;
@@ -69,6 +78,8 @@ export function SearchResults({ searchState, setSearchState }: SearchResultsProp
 
   const handlePageChange = (newPage: number) => {
     setSearchState(prev => ({ ...prev, page: newPage }));
+    // Invalidate and refetch with new page
+    queryClient.invalidateQueries({ queryKey: ['search'] });
   };
 
   return (
