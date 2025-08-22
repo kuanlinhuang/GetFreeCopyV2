@@ -98,7 +98,8 @@ async function searchArxiv(query: string, dateFilter: string, page: number, limi
 
 async function searchBioRxiv(query: string, server: 'biorxiv' | 'medrxiv', dateFilter: string, page: number, limit: number): Promise<Paper[]> {
   try {
-    let interval = '100'; // Default to recent papers
+    // For bioRxiv/medRxiv, we need to fetch papers by date range and then filter by query
+    let interval = '30d'; // Default to last 30 days
     
     // Calculate date interval based on filter
     if (dateFilter === '2025') {
@@ -116,36 +117,67 @@ async function searchBioRxiv(query: string, server: 'biorxiv' | 'medrxiv', dateF
       interval = `${sixMonthsAgo.toISOString().split('T')[0]}/${now.toISOString().split('T')[0]}`;
     } else if (dateFilter === 'last_30_days') {
       interval = '30d';
+    } else if (dateFilter === 'any') {
+      // For 'any' date filter, get recent papers from the last 6 months
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const now = new Date();
+      interval = `${sixMonthsAgo.toISOString().split('T')[0]}/${now.toISOString().split('T')[0]}`;
     }
     
-    const cursor = (page - 1) * limit;
-    const url = `https://api.biorxiv.org/details/${server}/${interval}/${cursor}/json`;
+    // We'll need to fetch multiple pages to get enough results since we're filtering
+    const maxPagesToFetch = 3; // Fetch up to 300 papers to filter from
+    let allPapers: any[] = [];
     
-    console.log(`${server} API URL:`, url);
-    
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`${server} API responded with status: ${response.status}`);
+    for (let fetchPage = 0; fetchPage < maxPagesToFetch; fetchPage++) {
+      const cursor = fetchPage * 100; // bioRxiv API returns 100 results per page
+      const url = `https://api.biorxiv.org/details/${server}/${interval}/${cursor}/json`;
+      
+      console.log(`${server} API URL (page ${fetchPage + 1}):`, url);
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`${server} API responded with status: ${response.status}`);
+        break;
+      }
+      
+      const data = await response.json();
+      
+      if (!data.collection || !Array.isArray(data.collection) || data.collection.length === 0) {
+        console.log(`${server} returned no more data on page ${fetchPage + 1}`);
+        break;
+      }
+      
+      allPapers.push(...data.collection);
+      
+      // If we got less than 100 results, we've reached the end
+      if (data.collection.length < 100) {
+        break;
+      }
     }
     
-    const data = await response.json();
+    console.log(`${server} fetched ${allPapers.length} total papers to filter`);
     
-    if (!data.collection || !Array.isArray(data.collection)) {
-      console.log(`${server} returned no collection data`);
-      return [];
-    }
-    
-    // Filter by query in title or abstract
-    const filteredPapers = data.collection.filter((paper: any) => {
-      const titleMatch = paper.title?.toLowerCase().includes(query.toLowerCase()) || false;
-      const abstractMatch = paper.abstract?.toLowerCase().includes(query.toLowerCase()) || false;
-      return titleMatch || abstractMatch;
+    // Filter by query in title, abstract, or authors
+    const filteredPapers = allPapers.filter((paper: any) => {
+      const searchLower = query.toLowerCase();
+      const titleMatch = paper.title?.toLowerCase().includes(searchLower) || false;
+      const abstractMatch = paper.abstract?.toLowerCase().includes(searchLower) || false;
+      const authorsMatch = paper.authors?.toLowerCase().includes(searchLower) || false;
+      return titleMatch || abstractMatch || authorsMatch;
     });
     
-    const papers: Paper[] = filteredPapers.slice(0, limit).map((paper: any) => {
-      const doiValue = paper.doi || paper.preprint_doi || '';
+    console.log(`${server} filtered to ${filteredPapers.length} papers matching "${query}"`);
+    
+    // Apply pagination to filtered results
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedPapers = filteredPapers.slice(startIndex, endIndex);
+    
+    const papers: Paper[] = paginatedPapers.map((paper: any) => {
+      const doiValue = paper.doi || '';
       return {
-        id: doiValue,
+        id: doiValue || `${server}-${paper.title?.substring(0, 20).replace(/\s+/g, '-')}`,
         title: paper.title || '',
         authors: paper.authors ? paper.authors.split(';').map((a: string) => a.trim()) : [],
         abstract: paper.abstract || '',
@@ -158,12 +190,28 @@ async function searchBioRxiv(query: string, server: 'biorxiv' | 'medrxiv', dateF
       };
     });
     
-    console.log(`${server} search returned ${papers.length} papers`);
+    console.log(`${server} search returned ${papers.length} papers for page ${page}`);
     return papers;
   } catch (error) {
     console.error(`${server} API error:`, error);
     return [];
   }
+}
+
+// Rate limiting for PMC API (max 3 requests per second)
+let lastPMCRequest = 0;
+
+async function rateLimitedFetch(url: string): Promise<Response> {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastPMCRequest;
+  const minInterval = 350; // 350ms = ~3 requests per second
+  
+  if (timeSinceLastRequest < minInterval) {
+    await new Promise(resolve => setTimeout(resolve, minInterval - timeSinceLastRequest));
+  }
+  
+  lastPMCRequest = Date.now();
+  return fetch(url);
 }
 
 async function searchPMC(query: string, dateFilter: string, page: number, limit: number): Promise<Paper[]> {
@@ -184,17 +232,25 @@ async function searchPMC(query: string, dateFilter: string, page: number, limit:
     } else if (dateFilter === 'last_6_months') {
       const sixMonthsAgo = new Date();
       const year = sixMonthsAgo.getFullYear();
-      const month = String(sixMonthsAgo.getMonth() + 7).padStart(2, '0'); // PMC uses different date format
+      const month = String(sixMonthsAgo.getMonth() + 1).padStart(2, '0');
       term += `+AND+${year}/${month}[PDAT]:3000[PDAT]`;
     }
     
-    // First, search for PMIDs
-    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pmc&term=${term}&retmode=json&retmax=${limit}&retstart=${retstart}&sort=pub_date`;
+    // Add required tool and email parameters as per NCBI guidelines
+    const toolParam = 'tool=GetFreeCopy&email=developer@getfreecopy.app';
+    
+    // First, search for PMIDs with rate limiting
+    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pmc&term=${term}&retmode=json&retmax=${limit}&retstart=${retstart}&sort=pub_date&${toolParam}`;
     
     console.log('PMC search URL:', searchUrl);
     
-    const searchResponse = await fetch(searchUrl);
+    const searchResponse = await rateLimitedFetch(searchUrl);
     if (!searchResponse.ok) {
+      if (searchResponse.status === 429) {
+        console.log('PMC API rate limit hit, waiting and retrying...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return []; // Return empty for now, could implement retry logic
+      }
       throw new Error(`PMC search API responded with status: ${searchResponse.status}`);
     }
     
@@ -205,12 +261,16 @@ async function searchPMC(query: string, dateFilter: string, page: number, limit:
       return [];
     }
     
-    // Then fetch details for found PMIDs
+    // Then fetch details for found PMIDs with rate limiting
     const pmcIds = searchData.esearchresult.idlist.join(',');
-    const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pmc&id=${pmcIds}&retmode=xml`;
+    const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pmc&id=${pmcIds}&retmode=xml&${toolParam}`;
     
-    const fetchResponse = await fetch(fetchUrl);
+    const fetchResponse = await rateLimitedFetch(fetchUrl);
     if (!fetchResponse.ok) {
+      if (fetchResponse.status === 429) {
+        console.log('PMC fetch API rate limit hit');
+        return []; // Return empty for now
+      }
       throw new Error(`PMC fetch API responded with status: ${fetchResponse.status}`);
     }
     
