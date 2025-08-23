@@ -20,7 +20,7 @@ export const paperSchema = z.object({
 export const searchRequestSchema = z.object({
   query: z.string().min(1),
   sources: z.array(z.enum(['arxiv', 'medrxiv', 'biorxiv', 'pmc'])).default(['arxiv', 'medrxiv', 'biorxiv', 'pmc']),
-  dateFilter: z.enum(['any', 'last_30_days', 'last_6_months', 'last_year', '2025', '2024']).default('any'),
+  dateFilter: z.enum(['any', 'last_year', '2025', '2024']).default('any'),
   sortBy: z.enum(['relevance', 'date_newest', 'date_oldest', 'citations']).default('relevance'),
   page: z.number().min(1).default(1),
   limit: z.number().min(1).max(100).default(20),

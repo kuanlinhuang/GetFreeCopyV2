@@ -137,8 +137,6 @@ export function SearchInterface({ searchState, setSearchState }: SearchInterface
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="any">Publication Date: Any</SelectItem>
-                  <SelectItem value="last_30_days">Last 30 days</SelectItem>
-                  <SelectItem value="last_6_months">Last 6 months</SelectItem>
                   <SelectItem value="last_year">Last year</SelectItem>
                   <SelectItem value="2025">2025</SelectItem>
                   <SelectItem value="2024">2024</SelectItem>

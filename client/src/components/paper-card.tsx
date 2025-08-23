@@ -79,7 +79,7 @@ export function PaperCard({ paper }: PaperCardProps) {
             </Badge>
             {paper.category && (
               <>
-                <span className="text-xs text-gray-500">{paper.category}</span>
+                <span className="text-xs text-gray-500 capitalize">{paper.category}</span>
                 <span className="text-xs text-gray-400">•</span>
               </>
             )}

@@ -1,4 +1,4 @@
-import { type Paper, type SearchRequest, type SearchResponse } from "../shared/schema";
+import { type Paper, type SearchRequest, type SearchResponse } from "../shared/schema.js";
 
 export interface IStorage {
   // No persistent storage needed for this application

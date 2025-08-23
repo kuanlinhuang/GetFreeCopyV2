@@ -119,7 +119,82 @@
     - ✅ Skeleton loading states
 
 ### 🔍 Discovered During Work
-*Tasks discovered during development will be added here*
+
+#### ✅ Fix PostCSS and Tailwind Configuration Issues (2024-12-19)
+- **Issue**: PostCSS configuration was looking for `tailwindcss` in the wrong location, causing build failures
+- **Root Cause**: `postcss.config.js` was in the root directory but `tailwindcss` was installed in the `client` directory
+- **Solution**: 
+  - Moved `postcss.config.js` to the `client` directory where dependencies are installed
+  - Removed duplicate configuration files from root directory
+  - Added `"type": "module"` to root `package.json` to fix module type warnings
+  - Cleaned up duplicate vite config files that were causing conflicts
+- **Files Modified**: 
+  - Created `client/postcss.config.js`
+  - Deleted `postcss.config.js` (root)
+  - Deleted `tailwind.config.ts` (root)
+  - Deleted multiple duplicate `vite.config.*` files
+  - Updated root `package.json` with module type
+- **Status**: ✅ Resolved - Both server and client now start successfully
+
+#### ✅ Fix Module System Conflicts (2024-12-19)
+- **Issue**: Server was failing to import `searchRequestSchema` due to module system mismatch
+- **Root Cause**: Conflicting TypeScript configurations between CommonJS and ES modules
+  - Root `tsconfig.json` used `"module": "ESNext"`
+  - Server `tsconfig.json` used `"module": "commonjs"`
+  - Root `package.json` had `"type": "module"`
+- **Solution**: 
+  - Updated server's TypeScript config to use ES modules (`"module": "ES2020"`)
+  - Updated all import statements to use `.js` extensions for ES module compatibility
+  - Cleaned up old compiled JavaScript files
+- **Files Modified**: 
+  - Updated `server/tsconfig.json` module setting
+  - Updated import statements in `server/routes.ts`, `server/storage.ts`, `server/index.ts`
+  - Removed old compiled schema files
+- **Status**: ✅ Resolved - Server now starts successfully and can import shared schema
+
+#### ✅ Update Search Logic for bioRxiv/medRxiv (2024-12-19)
+- **Issue**: bioRxiv and medRxiv were using separate API calls, but now should be filtered from PMC results
+- **Changes Made**:
+  - **Removed separate bioRxiv/medRxiv API calls**: No longer calling bioRxiv/medRxiv APIs directly
+  - **Added filtering function**: `filterBioRxivFromPMC()` filters papers from PMC results based on journal title and DOI
+  - **Increased PMC search limit**: When bioRxiv/medRxiv are requested, PMC search gets 3x more results to filter from
+  - **Fixed journal title display**: 
+    - Decode HTML entities (`&amp;` → `&`, etc.)
+    - Remove HTML tags
+    - Proper capitalization in frontend
+  - **Updated URL generation**: bioRxiv/medRxiv papers now point to correct URLs
+- **Files Modified**: 
+  - `server/routes.ts`: Updated search logic, added filtering function, improved PMC search
+  - `client/src/components/paper-card.tsx`: Added capitalization for journal titles
+- **Benefits**:
+  - More bioRxiv/medRxiv results (filtered from larger PMC dataset)
+  - Better performance (single API call instead of multiple)
+  - Cleaner journal title display
+  - Proper HTML entity rendering
+- **Status**: ✅ Implemented - Search logic updated and tested
+
+#### ✅ Fix bioRxiv/medRxiv Filtering and Remove Date Filters (2024-12-19)
+- **Issue**: 
+  - bioRxiv/medRxiv filtering was incorrectly labeling papers (both bioRxiv and medRxiv were getting the same papers)
+  - "Last 30 days" and "Last 6 months" date filters were causing issues and not needed
+- **Changes Made**:
+  - **Fixed bioRxiv/medRxiv filtering logic**: 
+    - Now only uses journal title for filtering (removed DOI-based filtering)
+    - Added exclusion logic: bioRxiv papers exclude medRxiv mentions and vice versa
+    - More accurate labeling based on specific journal titles
+  - **Removed date filter options**:
+    - Removed "Last 30 days" and "Last 6 months" from schema
+    - Removed corresponding logic from arXiv and PMC search functions
+    - Updated frontend to remove these options from dropdown
+- **Files Modified**: 
+  - `shared/schema.ts`: Removed date filter options
+  - `server/routes.ts`: Fixed filtering logic, removed date filter handling
+  - `client/src/components/search-interface.tsx`: Removed date filter options
+- **Benefits**:
+  - More accurate bioRxiv/medRxiv labeling
+  - Cleaner date filter options
+  - Better search performance
+- **Status**: ✅ Implemented - Filtering fixed and date options cleaned up
 
 ## Completed Tasks
 

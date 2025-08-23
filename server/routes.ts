@@ -1,8 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { searchRequestSchema, type SearchResponse, type Paper } from "../shared/schema";
+import { searchRequestSchema, type SearchResponse, type Paper } from "../shared/schema.js";
 import { z } from "zod";
-import { searchCache } from "./storage";
+import { searchCache } from "./storage.js";
 
 // Search counter (persists across server restarts)
 let searchCounter = 3000; // Starting from 3000 as requested
@@ -21,19 +21,6 @@ async function searchArxiv(query: string, dateFilter: string, page: number, limi
       const currentYear = new Date().getFullYear();
       const lastYear = currentYear - 1;
       searchQuery += `+AND+submittedDate:[${lastYear}0101*+TO+${lastYear}1231*]`;
-    } else if (dateFilter === 'last_6_months') {
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-      const year = sixMonthsAgo.getFullYear();
-      const month = String(sixMonthsAgo.getMonth() + 1).padStart(2, '0');
-      searchQuery += `+AND+submittedDate:[${year}${month}01*+TO+*]`;
-    } else if (dateFilter === 'last_30_days') {
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const year = thirtyDaysAgo.getFullYear();
-      const month = String(thirtyDaysAgo.getMonth() + 1).padStart(2, '0');
-      const day = String(thirtyDaysAgo.getDate()).padStart(2, '0');
-      searchQuery += `+AND+submittedDate:[${year}${month}${day}*+TO+*]`;
     }
 
     const url = `http://export.arxiv.org/api/query?search_query=${searchQuery}&start=${startIndex}&max_results=${limit}&sortBy=submittedDate&sortOrder=descending`;
@@ -101,94 +88,40 @@ async function searchArxiv(query: string, dateFilter: string, page: number, limi
 }
 
 /**
- * Search bioRxiv or medRxiv papers with improved filtering and error handling
- * @param query - Search query string
+ * Filter papers from PMC results to get bioRxiv or medRxiv papers
+ * @param allPapers - All papers from PMC search
  * @param server - Either 'biorxiv' or 'medrxiv'
- * @param dateFilter - Date filter string
- * @param page - Page number for pagination
- * @param limit - Number of results per page
- * @returns Promise<Paper[]> - Array of papers matching the search criteria
+ * @param limit - Number of results to return
+ * @returns Paper[] - Array of papers from the specified server
  */
-async function searchBioRxiv(query: string, server: 'biorxiv' | 'medrxiv', dateFilter: string, page: number, limit: number): Promise<Paper[]> {
-  try {
-    // For bioRxiv/medRxiv, we need to fetch papers by date range and then filter by query
-    let interval = '30d'; // Default to last 30 days
+function filterBioRxivFromPMC(allPapers: Paper[], server: 'biorxiv' | 'medrxiv', limit: number): Paper[] {
+  const filteredPapers = allPapers.filter(paper => {
+    // Check if the paper is from bioRxiv or medRxiv based on journal title
+    const journalTitle = paper.category?.toLowerCase() || '';
     
-    // Calculate date interval based on filter
-    if (dateFilter === '2025') {
-      interval = '2025-01-01/2025-12-31';
-    } else if (dateFilter === '2024') {
-      interval = '2024-01-01/2024-12-31';
-    } else if (dateFilter === 'last_year') {
-      const currentYear = new Date().getFullYear();
-      const lastYear = currentYear - 1;
-      interval = `${lastYear}-01-01/${lastYear}-12-31`;
-    } else if (dateFilter === 'last_6_months') {
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-      const now = new Date();
-      interval = `${sixMonthsAgo.toISOString().split('T')[0]}/${now.toISOString().split('T')[0]}`;
-    } else if (dateFilter === 'last_30_days') {
-      interval = '30d';
-    } else if (dateFilter === 'any') {
-      // For 'any' date filter, get recent papers from the last 6 months
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-      const now = new Date();
-      interval = `${sixMonthsAgo.toISOString().split('T')[0]}/${now.toISOString().split('T')[0]}`;
+    if (server === 'biorxiv') {
+      // Only include if journal title specifically mentions bioRxiv (not medRxiv)
+      return journalTitle.includes('biorxiv') && !journalTitle.includes('medrxiv');
+    } else if (server === 'medrxiv') {
+      // Only include if journal title specifically mentions medRxiv (not bioRxiv)
+      return journalTitle.includes('medrxiv') && !journalTitle.includes('biorxiv');
     }
     
-    // Calculate cursor for pagination
-    const cursor = (page - 1) * limit;
-    const url = `https://api.biorxiv.org/details/${server}/${interval}/${cursor}/json`;
-    
-    console.log(`${server} API URL:`, url);
-    
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'GetFreeCopy/2.0 (https://getfreecopy.app; developer@getfreecopy.app)',
-      },
-    });
-    
-    if (!response.ok) {
-      console.error(`${server} API responded with status: ${response.status}`);
-      return [];
-    }
-    
-    const data = await response.json() as any;
-    
-    if (!data.collection || !Array.isArray(data.collection)) {
-      console.error(`Invalid response from ${server} API:`, data);
-      return [];
-    }
-    
-    console.log(`${server} fetched ${data.collection.length} papers`);
-    
-    // Convert to Paper format - simplified without filtering
-    const papers = data.collection.slice(0, limit).map((paper: any) => {
-      const doiValue = paper.doi || '';
-      const doiPath = doiValue.replace('10.1101/', '');
-      
-      return {
-        id: doiValue || `${server}-${paper.title?.substring(0, 20).replace(/\s+/g, '-')}`,
-        title: paper.title || '',
-        authors: paper.authors ? paper.authors.split(';').map((a: string) => a.trim()).filter((a: string) => a.length > 0) : [],
-        abstract: paper.abstract || '',
-        doi: paper.doi,
-        source: server,
-        category: paper.category || '',
-        publishedDate: paper.date || '',
-        url: doiValue ? `https://www.${server}.org/content/${doiPath}` : '#',
-        keywords: paper.category ? [paper.category] : [],
-      };
-    });
-    
-    console.log(`${server} search returned ${papers.length} papers`);
-    return papers;
-  } catch (error) {
-    console.error(`${server} API error:`, error);
-    return [];
-  }
+    return false;
+  });
+  
+  // Update the source to the correct server
+  const papersWithCorrectSource = filteredPapers.slice(0, limit).map(paper => ({
+    ...paper,
+    source: server,
+    // Update URL to point to the correct bioRxiv/medRxiv URL
+    url: paper.doi?.includes('10.1101/') 
+      ? `https://www.${server}.org/content/${paper.doi.replace('10.1101/', '')}`
+      : paper.url
+  }));
+  
+  console.log(`${server} filtered ${papersWithCorrectSource.length} papers from PMC results`);
+  return papersWithCorrectSource;
 }
 
 /**
@@ -303,11 +236,6 @@ async function searchPMC(query: string, dateFilter: string, page: number, limit:
       const currentYear = new Date().getFullYear();
       const lastYear = currentYear - 1;
       term += `+AND+${lastYear}[PDAT]`;
-    } else if (dateFilter === 'last_6_months') {
-      const sixMonthsAgo = new Date();
-      const year = sixMonthsAgo.getFullYear();
-      const month = String(sixMonthsAgo.getMonth() + 1).padStart(2, '0');
-      term += `+AND+${year}/${month}[PDAT]:3000[PDAT]`;
     }
     
     // Add required tool and email parameters as per NCBI guidelines
@@ -408,8 +336,18 @@ async function searchPMC(query: string, dateFilter: string, page: number, limit:
           }
         }
         
-        // Extract journal information
-        const journalTitle = articleXml.match(/<journal-title[^>]*>([\s\S]*?)<\/journal-title>/)?.[1]?.trim() || '';
+        // Extract journal information and clean it up
+        let journalTitle = articleXml.match(/<journal-title[^>]*>([\s\S]*?)<\/journal-title>/)?.[1]?.trim() || '';
+        // Decode HTML entities and capitalize properly
+        journalTitle = journalTitle
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&nbsp;/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
         
         // Extract keywords/subject categories
         const keywords: string[] = [];
@@ -490,26 +428,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
       
-      if (sources.includes('medrxiv')) {
-        searchPromises.push(
-          searchBioRxiv(query, 'medrxiv', dateFilter, page, limit)
-            .then(papers => ({ source: 'medrxiv', papers }))
-            .catch(error => ({ source: 'medrxiv', papers: [], error: error.message }))
-        );
-      }
+      // bioRxiv and medRxiv will be filtered from PMC results, so we don't need separate API calls
+      // They will be processed after PMC search completes
       
-      if (sources.includes('biorxiv')) {
-        searchPromises.push(
-          searchBioRxiv(query, 'biorxiv', dateFilter, page, limit)
-            .then(papers => ({ source: 'biorxiv', papers }))
-            .catch(error => ({ source: 'biorxiv', papers: [], error: error.message }))
-        );
-      }
+      // Calculate how many results we need from PMC
+      // If bioRxiv/medRxiv are requested, we need more results to filter from
+      const needsBioRxiv = sources.includes('biorxiv');
+      const needsMedRxiv = sources.includes('medrxiv');
+      const pmcLimit = needsBioRxiv || needsMedRxiv ? limit * 3 : limit; // Get 3x more results if filtering needed
       
-      if (sources.includes('pmc')) {
+      if (sources.includes('pmc') || needsBioRxiv || needsMedRxiv) {
         searchPromises.push(
           Promise.race([
-            searchPMC(query, dateFilter, page, limit),
+            searchPMC(query, dateFilter, page, pmcLimit),
             new Promise<Paper[]>((resolve) => 
               setTimeout(() => {
                 console.log('PMC search timed out after 8 seconds');
@@ -528,6 +459,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Process results and track status
       const allPapers: Paper[] = [];
       const errors: string[] = [];
+      let pmcPapers: Paper[] = [];
       
       results.forEach((result, index) => {
         if (result.status === 'fulfilled') {
@@ -536,8 +468,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sourceStatus[source] = { status: 'error', error };
             errors.push(`${source}: ${error}`);
           } else {
-            sourceStatus[source] = { status: 'success', count: papers.length };
-            allPapers.push(...papers);
+            if (source === 'pmc') {
+              pmcPapers = papers; // Store PMC papers for filtering
+              sourceStatus[source] = { status: 'success', count: papers.length };
+              allPapers.push(...papers);
+            } else {
+              sourceStatus[source] = { status: 'success', count: papers.length };
+              allPapers.push(...papers);
+            }
           }
         } else {
           const source = sources[index] || 'unknown';
@@ -545,6 +483,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errors.push(`${source}: ${result.reason?.message || 'Unknown error'}`);
         }
       });
+      
+      // Filter bioRxiv and medRxiv papers from PMC results
+      if (needsBioRxiv && pmcPapers.length > 0) {
+        const biorxivPapers = filterBioRxivFromPMC(pmcPapers, 'biorxiv', limit);
+        if (biorxivPapers.length > 0) {
+          sourceStatus['biorxiv'] = { status: 'success', count: biorxivPapers.length };
+          allPapers.push(...biorxivPapers);
+        } else {
+          sourceStatus['biorxiv'] = { status: 'error', error: 'No bioRxiv papers found in PMC results' };
+          errors.push('biorxiv: No bioRxiv papers found in PMC results');
+        }
+      }
+      
+      if (needsMedRxiv && pmcPapers.length > 0) {
+        const medrxivPapers = filterBioRxivFromPMC(pmcPapers, 'medrxiv', limit);
+        if (medrxivPapers.length > 0) {
+          sourceStatus['medrxiv'] = { status: 'success', count: medrxivPapers.length };
+          allPapers.push(...medrxivPapers);
+        } else {
+          sourceStatus['medrxiv'] = { status: 'error', error: 'No medRxiv papers found in PMC results' };
+          errors.push('medrxiv: No medRxiv papers found in PMC results');
+        }
+      }
       
       // Sort results - PMC first, then by specified sort order
       let sortedPapers = [...allPapers];

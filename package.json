@@ -2,6 +2,7 @@
   "name": "getfreecopy",
   "version": "2.0.0",
   "description": "Academic research paper search platform",
+  "type": "module",
   "main": "server/index.ts",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
