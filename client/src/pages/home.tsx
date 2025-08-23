@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { SearchInterface } from "@/components/search-interface";
 import { SearchResults } from "@/components/search-results";
 import { LoadingOverlay } from "@/components/loading-overlay";
 import type { SearchState } from "@/types";
+import { getSearchCounter } from "@/lib/api";
 
 export default function Home() {
   const [searchState, setSearchState] = useState<SearchState>({
@@ -15,7 +16,25 @@ export default function Home() {
     page: 1,
     isLoading: false,
     error: null,
+    shouldSearch: false,
+    accumulatedResults: [],
   });
+
+  const [searchCount, setSearchCount] = useState<number>(3000);
+
+  // Fetch search counter on component mount and when search is performed
+  useEffect(() => {
+    const fetchSearchCounter = async () => {
+      try {
+        const data = await getSearchCounter();
+        setSearchCount(data.searchCount);
+      } catch (error) {
+        console.error('Failed to fetch search counter:', error);
+      }
+    };
+
+    fetchSearchCounter();
+  }, [searchState.shouldSearch]); // Refresh counter when search is triggered
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -32,7 +51,13 @@ export default function Home() {
                 <p className="text-sm text-gray-500">Academic Research Access</p>
               </div>
             </div>
-
+            
+            {/* About text in header */}
+            <div className="hidden md:block">
+              <p className="text-sm text-gray-600 max-w-md">
+                Making academic research accessible by providing a unified search experience across multiple free databases.
+              </p>
+            </div>
           </div>
         </div>
       </header>
@@ -43,7 +68,7 @@ export default function Home() {
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-gray-900 mb-4">Discover Academic Research Papers</h2>
             <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-              Search across arXiv, medRxiv, bioRxiv, and PMC to find and access research papers for free
+              Search across arXiv, medRxiv, bioRxiv, and PMC to find free research papers
             </p>
           </div>
 
@@ -66,26 +91,16 @@ export default function Home() {
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 mt-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div>
-              <h5 className="font-semibold text-gray-900 mb-4">About GetFreeCopy</h5>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                Making academic research accessible by aggregating free sources and providing a unified search experience across multiple databases.
-              </p>
-            </div>
-
-            <div>
-              <h5 className="font-semibold text-gray-900 mb-4">Data Sources</h5>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li><a href="https://arxiv.org" className="hover:text-primary-500 transition-colors">arXiv.org</a></li>
-                <li><a href="https://www.medrxiv.org" className="hover:text-primary-500 transition-colors">medRxiv</a></li>
-                <li><a href="https://www.biorxiv.org" className="hover:text-primary-500 transition-colors">bioRxiv</a></li>
-                <li><a href="https://www.ncbi.nlm.nih.gov/pmc/" className="hover:text-primary-500 transition-colors">PubMed Central</a></li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-200 mt-8 pt-8 text-center">
+          <div className="flex flex-col items-center space-y-2">
+            <p className="text-sm text-gray-500">
+              <span className="font-medium">{searchCount.toLocaleString()}</span> searches powered so far
+            </p>
+            <p className="text-sm text-gray-500">
+              Proudly made by <a href="https://precisionomics.org" target="_blank" rel="noopener noreferrer" className="text-primary-500 hover:text-primary-600 font-medium">Huang Lab</a> at the <span className="font-medium">Icahn School of Medicine at Mount Sinai</span>
+            </p>
+            <p className="text-sm text-gray-500">
+              Data sources: <a href="https://arxiv.org" className="hover:text-primary-500 transition-colors">arXiv</a>, <a href="https://www.medrxiv.org" className="hover:text-primary-500 transition-colors">medRxiv</a>, <a href="https://www.biorxiv.org" className="hover:text-primary-500 transition-colors">bioRxiv</a>, <a href="https://www.ncbi.nlm.nih.gov/pmc/" className="hover:text-primary-500 transition-colors">PMC</a>
+            </p>
             <p className="text-sm text-gray-500">&copy; 2025 GetFreeCopy. All rights reserved.</p>
           </div>
         </div>

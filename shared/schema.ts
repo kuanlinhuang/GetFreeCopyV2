@@ -32,6 +32,12 @@ export const searchResponseSchema = z.object({
   page: z.number(),
   limit: z.number(),
   hasMore: z.boolean(),
+  sourceStatus: z.record(z.object({
+    status: z.enum(['pending', 'success', 'error']),
+    count: z.number().optional(),
+    error: z.string().optional(),
+  })).optional(),
+  errors: z.array(z.string()).optional(),
 });
 
 export type Paper = z.infer<typeof paperSchema>;

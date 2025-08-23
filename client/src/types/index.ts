@@ -12,4 +12,6 @@ export interface SearchState {
   page: number;
   isLoading: boolean;
   error: string | null;
+  shouldSearch: boolean; // Flag to indicate when search should be performed
+  accumulatedResults: any[]; // Store accumulated search results
 }

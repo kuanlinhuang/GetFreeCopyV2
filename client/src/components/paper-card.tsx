@@ -1,4 +1,4 @@
-import { ExternalLink, Bookmark, Share2 } from "lucide-react";
+import { ExternalLink, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Paper } from "@shared/schema";
@@ -49,11 +49,6 @@ export function PaperCard({ paper }: PaperCardProps) {
     } catch {
       return dateString;
     }
-  };
-
-  const handleSave = () => {
-    // TODO: Implement bookmarking functionality
-    console.log('Bookmarked paper:', paper.id);
   };
 
   const handleShare = () => {
@@ -150,16 +145,6 @@ export function PaperCard({ paper }: PaperCardProps) {
               <ExternalLink className="h-4 w-4 mr-2" />
               View Paper
             </a>
-          </Button>
-          
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleSave}
-            data-testid={`button-save-${paper.id}`}
-          >
-            <Bookmark className="h-4 w-4 mr-2" />
-            Save
           </Button>
           
           <Button 

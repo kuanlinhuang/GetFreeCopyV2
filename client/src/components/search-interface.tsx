@@ -1,8 +1,10 @@
 import { Search } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchSuggestions } from "./search-suggestions";
 import type { SearchState, Source } from "@/types";
 
 interface SearchInterfaceProps {
@@ -11,6 +13,8 @@ interface SearchInterfaceProps {
 }
 
 export function SearchInterface({ searchState, setSearchState }: SearchInterfaceProps) {
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
   const handleSearch = () => {
     if (!searchState.query.trim()) return;
     
@@ -19,7 +23,19 @@ export function SearchInterface({ searchState, setSearchState }: SearchInterface
       page: 1,
       isLoading: true,
       error: null,
+      shouldSearch: true, // Trigger the search
+      accumulatedResults: [], // Reset accumulated results for new search
     }));
+    setShowSuggestions(false);
+  };
+
+  const handleSuggestionSelect = (suggestion: string) => {
+    setSearchState(prev => ({ 
+      ...prev, 
+      query: suggestion,
+      shouldSearch: false // Don't trigger search automatically when selecting suggestion
+    }));
+    setShowSuggestions(false);
   };
 
   const handleSourceToggle = (source: Source, checked: boolean) => {
@@ -51,12 +67,27 @@ export function SearchInterface({ searchState, setSearchState }: SearchInterface
               type="text"
               placeholder="Search by title, author, keywords, or DOI..."
               value={searchState.query}
-              onChange={(e) => setSearchState(prev => ({ ...prev, query: e.target.value }))}
+              onChange={(e) => {
+                setSearchState(prev => ({ 
+                  ...prev, 
+                  query: e.target.value,
+                  shouldSearch: false // Reset search flag when typing
+                }));
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
               className="pl-12 py-3 text-base"
               data-testid="input-search"
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            
+            <SearchSuggestions
+              query={searchState.query}
+              onSuggestionSelect={handleSuggestionSelect}
+              isVisible={showSuggestions}
+              onClose={() => setShowSuggestions(false)}
+            />
           </div>
           <Button 
             onClick={handleSearch}
