@@ -37,9 +37,13 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// Start server only in development
-if (process.env.NODE_ENV !== 'production') {
-  server.then(httpServer => {
+// Start server in both development and production
+server.then(httpServer => {
+  if (process.env.NODE_ENV === 'production') {
+    // In production, just export the app for serverless deployment
+    console.log('🚀 Production server ready for deployment');
+  } else {
+    // In development, start the server
     httpServer.listen({
       port: PORT,
       host: "localhost",
@@ -47,7 +51,7 @@ if (process.env.NODE_ENV !== 'production') {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       console.log(`📊 Health check: http://localhost:${PORT}/health`);
     });
-  });
-}
+  }
+});
 
 export default app;
